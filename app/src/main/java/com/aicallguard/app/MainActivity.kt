@@ -1,33 +1,69 @@
 package com.aicallguard.app
 
-import android.content.Context
+import android.Manifest
 import android.content.Intent
-import android.net.Uri
+import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.rounded.PowerSettingsNew
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,154 +73,199 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private fun dial(ctx: Context, code: String) {
-    ctx.startActivity(
-        Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(code)))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    )
-}
-
-@Composable
-private fun fieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = Accent,
-    unfocusedBorderColor = Color.White.copy(0.15f),
-    focusedLabelColor = Accent
-)
-
 @Composable
 fun HomeScreen() {
     val ctx = LocalContext.current
-    var twilio by remember { mutableStateOf(Prefs.get(ctx, Prefs.TWILIO_NUMBER)) }
-    var server by remember { mutableStateOf(Prefs.get(ctx, Prefs.SERVER_URL)) }
-    var token by remember { mutableStateOf(Prefs.get(ctx, Prefs.API_TOKEN)) }
-    var calls by remember { mutableStateOf<List<CallItem>>(emptyList()) }
-    var status by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(false) }
+    var owner by remember { mutableStateOf(Prefs.owner(ctx)) }
+    var code by remember { mutableStateOf(Prefs.code(ctx)) }
+    var showCode by remember { mutableStateOf(false) }
+    val active = GuardState.active
 
-    val validNumber = twilio.startsWith("+") && twilio.length >= 8
+    val perms = arrayOf(
+        Manifest.permission.RECORD_AUDIO,
+        Manifest.permission.READ_PHONE_STATE,
+        Manifest.permission.ANSWER_PHONE_CALLS,
+        Manifest.permission.POST_NOTIFICATIONS
+    )
+
+    fun startGuard() {
+        ContextCompat.startForegroundService(ctx, Intent(ctx, GuardService::class.java))
+    }
+
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { r ->
+        if (r[Manifest.permission.RECORD_AUDIO] == true &&
+            r[Manifest.permission.READ_PHONE_STATE] == true &&
+            r[Manifest.permission.ANSWER_PHONE_CALLS] == true
+        ) {
+            startGuard()
+        }
+    }
+
+    fun toggle() {
+        if (active) {
+            ctx.stopService(Intent(ctx, GuardService::class.java))
+        } else {
+            val missing = perms.filter {
+                ContextCompat.checkSelfPermission(ctx, it) != PackageManager.PERMISSION_GRANTED
+            }
+            if (missing.isEmpty()) startGuard() else launcher.launch(missing.toTypedArray())
+        }
+    }
 
     Box(
-        Modifier.fillMaxSize()
+        Modifier
+            .fillMaxSize()
             .background(Brush.verticalGradient(listOf(Color(0xFF0B1020), Bg)))
     ) {
         Column(
-            Modifier.fillMaxSize()
-                .statusBarsPadding().navigationBarsPadding()
+            Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
             Column {
                 Text("AI Call Guard", fontSize = 32.sp, fontWeight = FontWeight.Bold)
-                Text("आपका पर्सनल AI रिसेप्शनिस्ट", color = Color.White.copy(0.6f))
+                Text("आपका पर्सनल AI रिसेप्शनिस्ट", color = Color.White.copy(alpha = 0.6f))
             }
 
-            GlassCard {
-                Text("1. Call Forwarding", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "अपना Twilio नंबर देश-कोड के साथ डालो (जैसे +14155550123)। नीचे के बटन dialer में सही कोड भर देते हैं, " +
-                        "आपको बस call दबानी है।",
-                    color = Color.White.copy(0.5f), fontSize = 13.sp
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = twilio,
-                    onValueChange = { twilio = it.trim(); Prefs.set(ctx, Prefs.TWILIO_NUMBER, twilio) },
-                    label = { Text("Twilio नंबर") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors()
-                )
-                Spacer(Modifier.height(12.dp))
-                Button(
-                    onClick = { dial(ctx, "**61*$twilio**30#") },
-                    enabled = validNumber,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Bg)
-                ) { Text("जब मैं न उठाऊँ तब AI (सुझाव)") }
-                OutlinedButton(
-                    onClick = { dial(ctx, "**67*$twilio#") },
-                    enabled = validNumber, modifier = Modifier.fillMaxWidth()
-                ) { Text("जब फ़ोन busy हो तब AI") }
-                OutlinedButton(
-                    onClick = { dial(ctx, "**62*$twilio#") },
-                    enabled = validNumber, modifier = Modifier.fillMaxWidth()
-                ) { Text("जब फ़ोन बंद/नेटवर्क के बाहर हो तब AI") }
-                OutlinedButton(
-                    onClick = { dial(ctx, "**21*$twilio#") },
-                    enabled = validNumber, modifier = Modifier.fillMaxWidth()
-                ) { Text("हर कॉल सीधे AI को") }
-                TextButton(
-                    onClick = { dial(ctx, "##002#") },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("सारी forwarding बंद करो", color = Color(0xFFFF5C7A)) }
-                Text(
-                    "ये GSM कोड ज़्यादातर Airtel/Vi पर चलते हैं। Jio पर न चले तो Phone ऐप → Settings → Call forwarding से करो।",
-                    color = Color.White.copy(0.4f), fontSize = 12.sp
-                )
-            }
+            PowerOrb(active) { toggle() }
+
+            Text(
+                if (active) "सुरक्षा चालू • हर कॉल AI उठाएगा" else "सुरक्षा बंद • चालू करने के लिए टैप करें",
+                color = if (active) Accent else Color.White.copy(alpha = 0.6f),
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center
+            )
 
             GlassCard {
-                Text("2. Server", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-                Spacer(Modifier.height(10.dp))
+                Text("सेटिंग्स", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
-                    value = server,
-                    onValueChange = { server = it.trim(); Prefs.set(ctx, Prefs.SERVER_URL, server) },
-                    label = { Text("Server URL (https://...)") },
+                    value = owner,
+                    onValueChange = { v ->
+                        owner = v
+                        Prefs.setOwner(ctx, v)
+                    },
+                    label = { Text("आपका नाम (AI यही बोलेगा)") },
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors()
-                )
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = token,
-                    onValueChange = { token = it.trim(); Prefs.set(ctx, Prefs.API_TOKEN, token) },
-                    label = { Text("API Token") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
                     colors = fieldColors()
                 )
                 Spacer(Modifier.height(12.dp))
-                Button(
-                    onClick = {
-                        loading = true; status = ""
-                        ApiClient.fetchCalls(server, token) { r ->
-                            loading = false
-                            r.onSuccess { calls = it; status = "${it.size} कॉल मिलीं" }
-                            r.onFailure { status = "⚠️ Server से जुड़ नहीं पाया: ${it.message}" }
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { v ->
+                        val d = v.filter { it.isDigit() }.take(8)
+                        code = d
+                        if (d.length >= 4) Prefs.setCode(ctx, d)
+                    },
+                    label = { Text("सीक्रेट कोड (कम से कम 4 अंक)") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    visualTransformation = if (showCode) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { showCode = !showCode }) {
+                            Icon(
+                                if (showCode) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
+                                contentDescription = null
+                            )
                         }
                     },
-                    enabled = server.startsWith("http") && token.isNotEmpty() && !loading,
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Violet, contentColor = Color.White)
-                ) {
-                    Icon(Icons.Rounded.Refresh, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (loading) "लोड हो रहा है..." else "कॉल ट्रांसक्रिप्ट लाओ")
-                }
-                if (status.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(status, color = Color.White.copy(0.7f), fontSize = 13.sp)
-                }
+                    colors = fieldColors()
+                )
             }
 
-            calls.forEach { c ->
-                GlassCard {
-                    Text(c.from.ifEmpty { "Unknown" }, fontWeight = FontWeight.SemiBold)
-                    Text(c.startedAt, color = Color.White.copy(0.45f), fontSize = 12.sp)
-                    Spacer(Modifier.height(8.dp))
-                    c.lines.forEach {
-                        Text(it, color = Color.White.copy(0.85f), fontSize = 14.sp,
-                            modifier = Modifier.padding(vertical = 2.dp))
+            GlassCard {
+                Text("लाइव ट्रांसक्रिप्ट", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                Spacer(Modifier.height(8.dp))
+                if (CallLog.lines.isEmpty()) {
+                    Text("अभी तक कोई कॉल नहीं आई।", color = Color.White.copy(alpha = 0.5f))
+                } else {
+                    CallLog.lines.take(20).forEach { line ->
+                        Text(
+                            line,
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(vertical = 3.dp)
+                        )
                     }
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
+            Text(
+                "टिप: बैटरी सेटिंग्स में इस ऐप को \"Unrestricted\" रखें और पहले दूसरे फ़ोन से टेस्ट करें। " +
+                    "फ़ोन को शांत जगह रखें और volume ज़्यादा रखें। कुछ फ़ोन कॉल के दौरान माइक बंद कर देते हैं।",
+                color = Color.White.copy(alpha = 0.45f),
+                fontSize = 12.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun fieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = Accent,
+    unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
+    focusedLabelColor = Accent
+)
+
+@Composable
+fun PowerOrb(active: Boolean, onClick: () -> Unit) {
+    val t = rememberInfiniteTransition(label = "pulse")
+    val pulse by t.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.12f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "scale"
+    )
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(210.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            Modifier
+                .size(200.dp)
+                .scale(if (active) pulse else 1f)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        if (active) listOf(Accent.copy(alpha = 0.35f), Color.Transparent)
+                        else listOf(Color.White.copy(alpha = 0.08f), Color.Transparent)
+                    )
+                )
+        )
+        Box(
+            Modifier
+                .size(150.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.linearGradient(
+                        if (active) listOf(Accent, Violet)
+                        else listOf(Color(0xFF1B2133), Color(0xFF141A2A))
+                    )
+                )
+                .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Rounded.PowerSettingsNew,
+                contentDescription = "Toggle",
+                tint = if (active) Bg else Color.White.copy(alpha = 0.7f),
+                modifier = Modifier.size(56.dp)
+            )
         }
     }
 }
@@ -192,10 +273,11 @@ fun HomeScreen() {
 @Composable
 fun GlassCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
-        Modifier.fillMaxWidth()
+        Modifier
+            .fillMaxWidth()
             .clip(RoundedCornerShape(28.dp))
-            .background(Color.White.copy(0.06f))
-            .border(1.dp, Color.White.copy(0.10f), RoundedCornerShape(28.dp))
+            .background(Color.White.copy(alpha = 0.06f))
+            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(28.dp))
             .padding(18.dp),
         content = content
     )
