@@ -10,7 +10,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.VibrationEffect
-import android.os.VibratorManager
+import android.os.Vibrator
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -24,7 +24,7 @@ object AssistantEngine {
     private const val MAX_ROUNDS = 15   // itni koshish ke baad AI call kaat dega
 
     private val main = Handler(Looper.getMainLooper())
-    private var ctx: Context? = null
+    private var appCtx: Context? = null
     private var tts: TextToSpeech? = null
     private var recognizer: SpeechRecognizer? = null
     private var running = false
@@ -42,15 +42,20 @@ object AssistantEngine {
         "मैं AI असिस्टेंट हूँ और बिना कोड के कॉल आगे नहीं भेज सकता। कृपया कोड बोलिए।"
     )
 
-    fun isRunning() = running
+    fun isRunning(): Boolean = running
 
     fun start(context: Context) {
         if (running) return
-        ctx = context.applicationContext
-        running = true; unlocked = false; rounds = 0; errStreak = 0; warnedMic = false
+        val c = context.applicationContext
+        appCtx = c
+        running = true
+        unlocked = false
+        rounds = 0
+        errStreak = 0
+        warnedMic = false
         CallLog.add("📞 Incoming call — AI ने उठा लिया")
 
-        tts = TextToSpeech(ctx) { status ->
+        tts = TextToSpeech(c) { status ->
             if (status == TextToSpeech.SUCCESS && running) {
                 tts?.language = Locale("hi", "IN")
                 tts?.setAudioAttributes(
@@ -61,15 +66,21 @@ object AssistantEngine {
                 )
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {}
-                    override fun onDone(utteranceId: String?) = fire()
+                    override fun onDone(utteranceId: String?) {
+                        fire()
+                    }
                     @Deprecated("Deprecated in Java")
-                    override fun onError(utteranceId: String?) = fire()
+                    override fun onError(utteranceId: String?) {
+                        fire()
+                    }
                 })
                 main.postDelayed({
                     speaker(true)
-                    val name = Prefs.owner(ctx!!)
-                    say("नमस्ते! मैं $name का AI असिस्टेंट बोल रहा हूँ। वे अभी सीधे बात नहीं कर सकते। " +
-                        "कृपया अपना नाम और काम बताइए, या अगर आपके पास सीक्रेट कोड है तो वह बोलिए।") { listen() }
+                    val name = Prefs.owner(c)
+                    say(
+                        "नमस्ते! मैं $name का AI असिस्टेंट बोल रहा हूँ। वे अभी सीधे बात नहीं कर सकते। " +
+                            "कृपया अपना नाम और काम बताइए, या अगर आपके पास सीक्रेट कोड है तो वह बोलिए।"
+                    ) { listen() }
                 }, 1000)
             }
         }
@@ -90,30 +101,32 @@ object AssistantEngine {
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "u${System.nanoTime()}")
     }
 
+    @Suppress("DEPRECATION")
     private fun speaker(on: Boolean) {
         try {
-            @Suppress("DEPRECATION")
-            ctx?.getSystemService(AudioManager::class.java)?.isSpeakerphoneOn = on
-        } catch (_: Exception) {}
+            val am = appCtx?.getSystemService(AudioManager::class.java)
+            am?.isSpeakerphoneOn = on
+        } catch (_: Exception) {
+        }
     }
 
     private fun listen() {
-        val c = ctx ?: return
+        val c = appCtx ?: return
         if (!running || unlocked) return
         if (!SpeechRecognizer.isRecognitionAvailable(c)) {
-            CallLog.add("⚠️ इस फ़ोन पर speech recognition उपलब्ध नहीं है")
+            CallLog.add("⚠️ इस फ़ोन पर speech recognition उपलब्ध नहीं है (Google app चाहिए)")
             return
         }
         recognizer?.destroy()
-        recognizer = SpeechRecognizer.createSpeechRecognizer(c).apply {
-            setRecognitionListener(listener)
-        }
+        val r = SpeechRecognizer.createSpeechRecognizer(c)
+        r.setRecognitionListener(listener)
+        recognizer = r
         val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
         }
-        recognizer?.startListening(i)
+        r.startListening(i)
     }
 
     private val listener = object : RecognitionListener {
@@ -128,7 +141,7 @@ object AssistantEngine {
         override fun onError(error: Int) {
             if (!running || unlocked) return
             errStreak++
-            // Mic call ke dauran band ho to bar-bar AUDIO / INSUFFICIENT_PERMISSIONS jaisi errors aati hain
+            // Mic call ke dauran band ho to bar-bar errors aati hain
             if (!warnedMic && errStreak >= 8) {
                 warnedMic = true
                 CallLog.add("⚠️ लगता है इस फ़ोन में कॉल के दौरान mic बंद हो जाता है। यह फ़ीचर इस फ़ोन पर शायद काम न करे।")
@@ -143,8 +156,12 @@ object AssistantEngine {
         override fun onResults(results: Bundle?) {
             val heard = results
                 ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                ?.firstOrNull().orEmpty()
-            if (heard.isBlank()) { onError(SpeechRecognizer.ERROR_NO_MATCH); return }
+                ?.firstOrNull()
+                .orEmpty()
+            if (heard.isBlank()) {
+                onError(SpeechRecognizer.ERROR_NO_MATCH)
+                return
+            }
             errStreak = 0
             handleHeard(heard)
         }
@@ -155,7 +172,8 @@ object AssistantEngine {
         rounds++
         when {
             codeMatches(text) -> unlock()
-            rounds >= MAX_ROUNDS -> say("आपका कोड नहीं मिला। धन्यवाद, अब कॉल समाप्त की जा रही है।") { hangup() }
+            rounds >= MAX_ROUNDS ->
+                say("आपका कोड नहीं मिला। धन्यवाद, अब कॉल समाप्त की जा रही है।") { hangup() }
             else -> say(replies[(rounds - 1) % replies.size]) { listen() }
         }
     }
@@ -170,15 +188,18 @@ object AssistantEngine {
     )
 
     private fun codeMatches(text: String): Boolean {
-        val code = Prefs.code(ctx!!)
-        val joined = text.lowercase().split(Regex("[\\s,.\\-]+"))
+        val c = appCtx ?: return false
+        val code = Prefs.code(c)
+        val joined = text.lowercase()
+            .split(Regex("[\\s,.\\-]+"))
             .joinToString("") { wordDigits[it] ?: it }
         return joined.filter { it.isDigit() }.contains(code)
     }
 
     private fun unlock() {
         unlocked = true
-        recognizer?.destroy(); recognizer = null
+        recognizer?.destroy()
+        recognizer = null
         CallLog.add("✅ सही कोड — कॉल आपको connect की जा रही है")
         say("कोड सही है। कृपया लाइन पर रहिए, मैं आपको कनेक्ट कर रहा हूँ।") {
             speaker(false)
@@ -186,31 +207,40 @@ object AssistantEngine {
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun ringOwner() {
-        val c = ctx ?: return
+        val c = appCtx ?: return
         try {
-            ringtone = RingtoneManager.getRingtone(c, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
+            ringtone = RingtoneManager.getRingtone(
+                c, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+            )
             ringtone?.play()
-            c.getSystemService(VibratorManager::class.java).defaultVibrator
-                .vibrate(VibrationEffect.createWaveform(longArrayOf(0, 600, 400, 600, 400, 600), -1))
+            c.getSystemService(Vibrator::class.java)
+                ?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 600, 400, 600, 400, 600), -1))
             main.postDelayed({ ringtone?.stop() }, 10000)
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+        }
     }
 
+    @Suppress("DEPRECATION")
     private fun hangup() {
         try {
-            @Suppress("DEPRECATION")
-            ctx?.getSystemService(TelecomManager::class.java)?.endCall()
-        } catch (_: SecurityException) {}
+            appCtx?.getSystemService(TelecomManager::class.java)?.endCall()
+        } catch (_: SecurityException) {
+        }
     }
 
     fun stop() {
         if (!running) return
         running = false
         main.removeCallbacksAndMessages(null)
-        recognizer?.destroy(); recognizer = null
-        tts?.stop(); tts?.shutdown(); tts = null
-        ringtone?.stop(); ringtone = null
+        recognizer?.destroy()
+        recognizer = null
+        tts?.stop()
+        tts?.shutdown()
+        tts = null
+        ringtone?.stop()
+        ringtone = null
         speaker(false)
         CallLog.add("📴 Call खत्म")
     }
