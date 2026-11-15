@@ -19,28 +19,6 @@ import android.speech.tts.UtteranceProgressListener
 import android.telecom.TelecomManager
 import java.util.Locale
 
-// Simple in-memory CallLog helper (agar alag file mein nahi hai toh yeh compile error fix kar dega)
-object CallLog {
-    private val logs = mutableListOf<String>()
-    
-    fun add(message: String) {
-        logs.add(message)
-    }
-    
-    fun getAll(): List<String> = logs
-}
-
-// Simple Prefs helper (agar alag file mein nahi hai toh owner aur code error fix ho jayega)
-object Prefs {
-    fun owner(context: Context): String {
-        return "Vinay" // Apni app ke mutabiq SharedPreferences se read kar sakte ho
-    }
-    
-    fun code(context: Context): String {
-        return "1234" // Apni app ke mutabiq SharedPreferences se read kar sakte ho
-    }
-}
-
 object AssistantEngine {
 
     private const val MAX_ROUNDS = 15   // itni koshish ke baad AI call kaat dega
@@ -163,7 +141,6 @@ object AssistantEngine {
         override fun onError(error: Int) {
             if (!running || unlocked) return
             errStreak++
-            // Mic call ke dauran band ho to bar-bar errors aati hain
             if (!warnedMic && errStreak >= 8) {
                 warnedMic = true
                 CallLog.add("⚠️ लगता है इस फ़ोन में कॉल के दौरान mic बंद हो जाता है। यह फ़ीचर इस फ़ोन पर शायद काम न करे।")
@@ -246,3 +223,24 @@ object AssistantEngine {
 
     @Suppress("DEPRECATION")
     private fun hangup() {
+        try {
+            appCtx?.getSystemService(TelecomManager::class.java)?.endCall()
+        } catch (_: SecurityException) {
+        }
+    }
+
+    fun stop() {
+        if (!running) return
+        running = false
+        main.removeCallbacksAndMessages(null)
+        recognizer?.destroy()
+        recognizer = null
+        tts?.stop()
+        tts?.shutdown()
+        tts = null
+        ringtone?.stop()
+        ringtone = null
+        speaker(false)
+        CallLog.add("📴 Call खत्म")
+    }
+}
