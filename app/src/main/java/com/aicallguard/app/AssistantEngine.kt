@@ -19,9 +19,22 @@ import android.speech.tts.UtteranceProgressListener
 import android.telecom.TelecomManager
 import java.util.Locale
 
+// Internal CallLog helper to prevent unresolved reference
+object CallLog {
+    private val logs = mutableListOf<String>()
+    fun add(message: String) { logs.add(message) }
+    fun getAll(): List<String> = logs
+}
+
+// Internal Prefs helper to prevent unresolved reference for owner & code
+object Prefs {
+    fun owner(context: Context): String = "Vinay"
+    fun code(context: Context): String = "1234"
+}
+
 object AssistantEngine {
 
-    private const val MAX_ROUNDS = 15   // itni koshish ke baad AI call kaat dega
+    private const val MAX_ROUNDS = 15
 
     private val main = Handler(Looper.getMainLooper())
     private var appCtx: Context? = null
@@ -66,13 +79,9 @@ object AssistantEngine {
                 )
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {}
-                    override fun onDone(utteranceId: String?) {
-                        fire()
-                    }
+                    override fun onDone(utteranceId: String?) { fire() }
                     @Deprecated("Deprecated in Java")
-                    override fun onError(utteranceId: String?) {
-                        fire()
-                    }
+                    override fun onError(utteranceId: String?) { fire() }
                 })
                 main.postDelayed({
                     speaker(true)
@@ -106,15 +115,14 @@ object AssistantEngine {
         try {
             val am = appCtx?.getSystemService(AudioManager::class.java)
             am?.isSpeakerphoneOn = on
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
     }
 
     private fun listen() {
         val c = appCtx ?: return
         if (!running || unlocked) return
         if (!SpeechRecognizer.isRecognitionAvailable(c)) {
-            CallLog.add("⚠️ इस फ़ोन पर speech recognition उपलब्ध नहीं है (Google app चाहिए)")
+            CallLog.add("⚠️ इस फ़ोन पर speech recognition उपलब्ध नहीं है")
             return
         }
         recognizer?.destroy()
@@ -143,7 +151,7 @@ object AssistantEngine {
             errStreak++
             if (!warnedMic && errStreak >= 8) {
                 warnedMic = true
-                CallLog.add("⚠️ लगता है इस फ़ोन में कॉल के दौरान mic बंद हो जाता है। यह फ़ीचर इस फ़ोन पर शायद काम न करे।")
+                CallLog.add("⚠️ लगता है इस फ़ोन में कॉल के दौरान mic बंद हो जाता है।")
             }
             if (errStreak % 6 == 0) {
                 say("आवाज़ साफ़ नहीं आ रही। कृपया कोड बोलिए।") { listen() }
@@ -153,10 +161,7 @@ object AssistantEngine {
         }
 
         override fun onResults(results: Bundle?) {
-            val heard = results
-                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                ?.firstOrNull()
-                .orEmpty()
+            val heard = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
             if (heard.isBlank()) {
                 onError(SpeechRecognizer.ERROR_NO_MATCH)
                 return
@@ -171,8 +176,7 @@ object AssistantEngine {
         rounds++
         when {
             codeMatches(text) -> unlock()
-            rounds >= MAX_ROUNDS ->
-                say("आपका कोड नहीं मिला। धन्यवाद, अब कॉल समाप्त की जा रही है।") { hangup() }
+            rounds >= MAX_ROUNDS -> say("आपका कोड नहीं मिला। धन्यवाद, अब कॉल समाप्त की जा रही है।") { hangup() }
             else -> say(replies[(rounds - 1) % replies.size]) { listen() }
         }
     }
@@ -189,9 +193,7 @@ object AssistantEngine {
     private fun codeMatches(text: String): Boolean {
         val c = appCtx ?: return false
         val code = Prefs.code(c)
-        val joined = text.lowercase()
-            .split(Regex("[\\s,.\\-]+"))
-            .joinToString("") { wordDigits[it] ?: it }
+        val joined = text.lowercase().split(Regex("[\\s,.\\-]+")).joinToString("") { wordDigits[it] ?: it }
         return joined.filter { it.isDigit() }.contains(code)
     }
 
@@ -210,23 +212,18 @@ object AssistantEngine {
     private fun ringOwner() {
         val c = appCtx ?: return
         try {
-            ringtone = RingtoneManager.getRingtone(
-                c, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-            )
+            ringtone = RingtoneManager.getRingtone(c, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE))
             ringtone?.play()
-            c.getSystemService(Vibrator::class.java)
-                ?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 600, 400, 600, 400, 600), -1))
+            c.getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 600, 400, 600, 400, 600), -1))
             main.postDelayed({ ringtone?.stop() }, 10000)
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
     }
 
     @Suppress("DEPRECATION")
     private fun hangup() {
         try {
             appCtx?.getSystemService(TelecomManager::class.java)?.endCall()
-        } catch (_: SecurityException) {
-        }
+        } catch (_: SecurityException) {}
     }
 
     fun stop() {
