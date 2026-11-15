@@ -222,4 +222,179 @@ fun DialTab(onCall: (String) -> Unit) {
             if (number.isEmpty()) "सामने वाले का ID डालिए" else number,
             fontSize = if (number.isEmpty()) 16.sp else 34.sp,
             fontWeight = FontWeight.Bold,
-            color = if (number.isEmpty()) Color.White.copy(alpha = 0.35f) else
+            color = if (number.isEmpty()) Color.White.copy(alpha = 0.35f) else Color.White,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            textAlign = TextAlign.Center
+        )
+        listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9")).forEach { row ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) { row.forEach { Key(it) } }
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier
+                    .size(68.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.08f))
+                    .clickable { number = number.dropLast(1) },
+                contentAlignment = Alignment.Center
+            ) { Text("⌫", fontSize = 24.sp) }
+            Key("0")
+            RoundIcon(Icons.Rounded.Call, Green) { onCall(number) }
+        }
+    }
+}
+
+@Composable
+fun AiTab() {
+    val ctx = LocalContext.current
+    var ai by remember { mutableStateOf(Prefs.aiMode(ctx)) }
+    var name by remember { mutableStateOf(Prefs.name(ctx)) }
+    var code by remember { mutableStateOf(Prefs.code(ctx)) }
+    var showCode by remember { mutableStateOf(false) }
+    var trusted by remember { mutableStateOf(Prefs.trusted(ctx)) }
+    var modelReady by remember { mutableStateOf(ModelStore.ready(ctx)) }
+    var progress by remember { mutableIntStateOf(-1) }
+    var err by remember { mutableStateOf<String?>(null) }
+
+    GlassCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("AI असिस्टेंट", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                Text(
+                    "चालू हो तो आने वाली कॉल AI उठाएगा",
+                    color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp
+                )
+            }
+            Switch(checked = ai, onCheckedChange = { ai = it; Prefs.setAiMode(ctx, it) })
+        }
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = name,
+            onValueChange = { name = it; Prefs.setName(ctx, it) },
+            label = { Text("आपका नाम (AI यही बोलेगा)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            colors = fieldColors()
+        )
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(
+            value = code,
+            onValueChange = { v ->
+                val d = v.filter { it.isDigit() }.take(8)
+                code = d
+                if (d.length >= 4) Prefs.setCode(ctx, d)
+            },
+            label = { Text("सीक्रेट कोड (कम से कम 4 अंक)") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            visualTransformation = if (showCode) VisualTransformation.None else PasswordVisualTransformation(),
+            trailingIcon = {
+                Text(
+                    if (showCode) "छुपाओ" else "दिखाओ",
+                    modifier = Modifier
+                        .clickable { showCode = !showCode }
+                        .padding(12.dp),
+                    color = Accent, fontSize = 13.sp
+                )
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = fieldColors()
+        )
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(
+            value = trusted,
+            onValueChange = { trusted = it; Prefs.setTrusted(ctx, it) },
+            label = { Text("भरोसेमंद IDs (कॉमा से अलग, इनकी कॉल सीधी आएगी)") },
+            modifier = Modifier.fillMaxWidth(),
+            colors = fieldColors()
+        )
+    }
+
+    GlassCard {
+        Text("आवाज़ पहचान मॉडल (हिंदी, ~42 MB)", fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            if (modelReady) "✅ तैयार है — caller बोलकर भी कोड बता सकेगा"
+            else "डाउनलोड नहीं है — बिना इसके caller को कीपैड से कोड डालना पड़ेगा",
+            color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp
+        )
+        if (progress in 0..99) {
+            Spacer(Modifier.height(10.dp))
+            LinearProgressIndicator(
+                progress = { progress / 100f },
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+        err?.let {
+            Spacer(Modifier.height(6.dp))
+            Text("⚠️ $it", color = Danger, fontSize = 12.sp)
+        }
+        if (!modelReady) {
+            Spacer(Modifier.height(10.dp))
+            Button(
+                onClick = {
+                    err = null
+                    progress = 0
+                    ModelStore.download(ctx, { progress = it }) { e ->
+                        err = e
+                        progress = -1
+                        modelReady = ModelStore.ready(ctx)
+                    }
+                },
+                enabled = progress < 0,
+                colors = ButtonDefaults.buttonColors(containerColor = Violet, contentColor = Color.White),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    if (progress in 0..99) "डाउनलोड हो रहा है… $progress%"
+                    else "मॉडल डाउनलोड करो (WiFi पर)"
+                )
+            }
+        }
+    }
+
+    GlassCard {
+        Text("लाइव AI लॉग", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+        Spacer(Modifier.height(8.dp))
+        if (CallState.log.isEmpty()) {
+            Text("अभी तक कोई AI कॉल नहीं हुई।", color = Color.White.copy(alpha = 0.5f))
+        } else {
+            CallState.log.take(25).forEach {
+                Text(
+                    it, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp,
+                    modifier = Modifier.padding(vertical = 3.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun HistoryTab() {
+    val ctx = LocalContext.current
+    val hist = remember { Prefs.history(ctx) }
+    GlassCard {
+        Text("कॉल हिस्ट्री", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+        Spacer(Modifier.height(8.dp))
+        if (hist.isEmpty()) {
+            Text("अभी कोई कॉल नहीं।", color = Color.White.copy(alpha = 0.5f))
+        } else {
+            hist.forEach {
+                Text(it, modifier = Modifier.padding(vertical = 5.dp), fontSize = 14.sp)
+            }
+        }
+    }
+}
