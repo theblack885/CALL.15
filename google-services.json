@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "34603228702",
+    "project_id": "call115",
+    "storage_bucket": "call115.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:34603228702:android:d2f52e372afe95ed2bd80f",
+        "android_client_info": {
+          "package_name": "com.aicallguard.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCCIZS_i8M-yQn-_zutUIgrwSFYEcoIpbY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
