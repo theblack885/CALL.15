@@ -1,27 +1,24 @@
 package com.aicallguard.app
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,23 +33,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.PowerSettingsNew
-import androidx.compose.material.icons.rounded.Visibility
-import androidx.compose.material.icons.rounded.VisibilityOff
+import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        Notifier.ensureChannels(this)
         setContent { GuardTheme { HomeScreen() } }
     }
 }
@@ -76,42 +77,29 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun HomeScreen() {
     val ctx = LocalContext.current
-    var owner by remember { mutableStateOf(Prefs.owner(ctx)) }
-    var code by remember { mutableStateOf(Prefs.code(ctx)) }
-    var showCode by remember { mutableStateOf(false) }
-    val active = GuardState.active
+    val myId = remember { Prefs.myId(ctx) }
+    var tab by remember { mutableIntStateOf(0) }
+    val listening = ServiceState.listening
 
-    val perms = arrayOf(
-        Manifest.permission.RECORD_AUDIO,
-        Manifest.permission.READ_PHONE_STATE,
-        Manifest.permission.ANSWER_PHONE_CALLS,
-        Manifest.permission.POST_NOTIFICATIONS
-    )
+    fun toast(s: String) = Toast.makeText(ctx, s, Toast.LENGTH_LONG).show()
 
-    fun startGuard() {
-        ContextCompat.startForegroundService(ctx, Intent(ctx, GuardService::class.java))
-    }
-
-    val launcher = rememberLauncherForActivityResult(
+    val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { r ->
-        if (r[Manifest.permission.RECORD_AUDIO] == true &&
-            r[Manifest.permission.READ_PHONE_STATE] == true &&
-            r[Manifest.permission.ANSWER_PHONE_CALLS] == true
-        ) {
-            startGuard()
+    ) { }
+
+    LaunchedEffect(Unit) {
+        val p = mutableListOf(Manifest.permission.RECORD_AUDIO)
+        if (Build.VERSION.SDK_INT >= 33) p.add(Manifest.permission.POST_NOTIFICATIONS)
+        permLauncher.launch(p.toTypedArray())
+        if (Prefs.listenOn(ctx) && !ServiceState.listening) {
+            ContextCompat.startForegroundService(ctx, Intent(ctx, ListenService::class.java))
         }
     }
 
-    fun toggle() {
-        if (active) {
-            ctx.stopService(Intent(ctx, GuardService::class.java))
-        } else {
-            val missing = perms.filter {
-                ContextCompat.checkSelfPermission(ctx, it) != PackageManager.PERMISSION_GRANTED
-            }
-            if (missing.isEmpty()) startGuard() else launcher.launch(missing.toTypedArray())
-        }
+    fun setListening(on: Boolean) {
+        Prefs.setListenOn(ctx, on)
+        val i = Intent(ctx, ListenService::class.java)
+        if (on) ContextCompat.startForegroundService(ctx, i) else ctx.stopService(i)
     }
 
     Box(
@@ -124,161 +112,114 @@ fun HomeScreen() {
                 .fillMaxSize()
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Column {
-                Text("AI Call Guard", fontSize = 32.sp, fontWeight = FontWeight.Bold)
-                Text("आपका पर्सनल AI रिसेप्शनिस्ट", color = Color.White.copy(alpha = 0.6f))
-            }
-
-            PowerOrb(active) { toggle() }
-
-            Text(
-                if (active) "सुरक्षा चालू • हर कॉल AI उठाएगा" else "सुरक्षा बंद • चालू करने के लिए टैप करें",
-                color = if (active) Accent else Color.White.copy(alpha = 0.6f),
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center
-            )
-
-            GlassCard {
-                Text("सेटिंग्स", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = owner,
-                    onValueChange = { v ->
-                        owner = v
-                        Prefs.setOwner(ctx, v)
-                    },
-                    label = { Text("आपका नाम (AI यही बोलेगा)") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors()
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = code,
-                    onValueChange = { v ->
-                        val d = v.filter { it.isDigit() }.take(8)
-                        code = d
-                        if (d.length >= 4) Prefs.setCode(ctx, d)
-                    },
-                    label = { Text("सीक्रेट कोड (कम से कम 4 अंक)") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    visualTransformation = if (showCode) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { showCode = !showCode }) {
-                            Icon(
-                                if (showCode) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-                                contentDescription = null
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = fieldColors()
+                Text("AI Call Guard", fontSize = 30.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "आपका अपना कॉलिंग सिस्टम + AI रिसेप्शनिस्ट",
+                    color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp
                 )
             }
 
             GlassCard {
-                Text("लाइव ट्रांसक्रिप्ट", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-                Spacer(Modifier.height(8.dp))
-                if (CallLog.lines.isEmpty()) {
-                    Text("अभी तक कोई कॉल नहीं आई।", color = Color.White.copy(alpha = 0.5f))
-                } else {
-                    CallLog.lines.take(20).forEach { line ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("आपका ID", color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
+                        Text(myId, fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Accent)
+                    }
+                    IconButton(onClick = {
+                        val cm = ctx.getSystemService(ClipboardManager::class.java)
+                        cm.setPrimaryClip(ClipData.newPlainText("id", myId))
+                        toast("ID कॉपी हो गया")
+                    }) { Icon(Icons.Rounded.ContentCopy, contentDescription = "copy") }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("कॉल रिसीव करना", fontWeight = FontWeight.SemiBold)
                         Text(
-                            line,
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 14.sp,
-                            modifier = Modifier.padding(vertical = 3.dp)
+                            if (listening) "चालू • आपके ID पर कॉल आ सकती हैं" else "बंद • कॉल नहीं आएगी",
+                            color = if (listening) Accent else Color.White.copy(alpha = 0.5f),
+                            fontSize = 12.sp
+                        )
+                    }
+                    Switch(checked = listening, onCheckedChange = { setListening(it) })
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("डायल", "AI सेटिंग", "हिस्ट्री").forEachIndexed { i, t ->
+                    val sel = tab == i
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(50))
+                            .background(if (sel) Accent else Color.White.copy(alpha = 0.07f))
+                            .clickable { tab = i }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            t, color = if (sel) Bg else Color.White,
+                            fontWeight = FontWeight.Medium, fontSize = 14.sp
                         )
                     }
                 }
             }
 
-            Text(
-                "टिप: बैटरी सेटिंग्स में इस ऐप को \"Unrestricted\" रखें और पहले दूसरे फ़ोन से टेस्ट करें। " +
-                    "फ़ोन को शांत जगह रखें और volume ज़्यादा रखें। कुछ फ़ोन कॉल के दौरान माइक बंद कर देते हैं।",
-                color = Color.White.copy(alpha = 0.45f),
-                fontSize = 12.sp
-            )
+            Column(
+                Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                when (tab) {
+                    0 -> DialTab(
+                        onCall = { number ->
+                            if (number.length < 4) {
+                                toast("सही ID डालिए")
+                            } else if (ContextCompat.checkSelfPermission(
+                                    ctx, Manifest.permission.RECORD_AUDIO
+                                ) != PackageManager.PERMISSION_GRANTED
+                            ) {
+                                toast("माइक की permission दीजिए")
+                                permLauncher.launch(arrayOf(Manifest.permission.RECORD_AUDIO))
+                            } else {
+                                val err = CallManager.startCall(ctx, number)
+                                if (err != null) toast(err)
+                                else ctx.startActivity(Intent(ctx, CallActivity::class.java))
+                            }
+                        }
+                    )
+                    1 -> AiTab()
+                    else -> HistoryTab()
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun fieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = Accent,
-    unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
-    focusedLabelColor = Accent
-)
+fun DialTab(onCall: (String) -> Unit) {
+    var number by remember { mutableStateOf("") }
 
-@Composable
-fun PowerOrb(active: Boolean, onClick: () -> Unit) {
-    val t = rememberInfiniteTransition(label = "pulse")
-    val pulse by t.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.12f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "scale"
-    )
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(210.dp),
-        contentAlignment = Alignment.Center
-    ) {
+    @Composable
+    fun Key(label: String) {
         Box(
             Modifier
-                .size(200.dp)
-                .scale(if (active) pulse else 1f)
+                .size(68.dp)
                 .clip(CircleShape)
-                .background(
-                    Brush.radialGradient(
-                        if (active) listOf(Accent.copy(alpha = 0.35f), Color.Transparent)
-                        else listOf(Color.White.copy(alpha = 0.08f), Color.Transparent)
-                    )
-                )
-        )
-        Box(
-            Modifier
-                .size(150.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.linearGradient(
-                        if (active) listOf(Accent, Violet)
-                        else listOf(Color(0xFF1B2133), Color(0xFF141A2A))
-                    )
-                )
-                .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
-                .clickable(onClick = onClick),
+                .background(Color.White.copy(alpha = 0.08f))
+                .clickable { if (number.length < 12) number += label },
             contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                Icons.Rounded.PowerSettingsNew,
-                contentDescription = "Toggle",
-                tint = if (active) Bg else Color.White.copy(alpha = 0.7f),
-                modifier = Modifier.size(56.dp)
-            )
-        }
+        ) { Text(label, fontSize = 24.sp, fontWeight = FontWeight.Medium) }
     }
-}
 
-@Composable
-fun GlassCard(content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(28.dp))
-            .background(Color.White.copy(alpha = 0.06f))
-            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(28.dp))
-            .padding(18.dp),
-        content = content
-    )
-}
+    GlassCard {
+        Text(
+            if (number.isEmpty()) "सामने वाले का ID डालिए" else number,
+            fontSize = if (number.isEmpty()) 16.sp else 34.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (number.isEmpty()) Color.White.copy(alpha = 0.35f) else
