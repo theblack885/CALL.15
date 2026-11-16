@@ -18,14 +18,21 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material.icons.rounded.Dialpad
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MicOff
+import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -53,10 +61,32 @@ class CallActivity : ComponentActivity() {
 }
 
 @Composable
+private fun ActionBtn(
+    icon: ImageVector,
+    label: String,
+    active: Boolean,
+    activeColor: Color = Accent,
+    onClick: () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        RoundIcon(
+            icon = icon,
+            bg = if (active) activeColor else Color.White.copy(alpha = 0.12f),
+            boxSize = 58.dp,
+            tint = if (active) Bg else Color.White,
+            onClick = onClick
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(label, fontSize = 11.sp, color = Color.White.copy(alpha = 0.7f))
+    }
+}
+
+@Composable
 fun CallScreen(onClose: () -> Unit) {
     val phase = CallState.phase
     val ringingOwner = CallState.aiHandling && CallState.ownerRinging
     var showPad by remember { mutableStateOf(false) }
+    var showNote by remember { mutableStateOf(false) }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
 
     LaunchedEffect(Unit) {
@@ -79,6 +109,7 @@ fun CallScreen(onClose: () -> Unit) {
         else -> ""
     }
     val label = if (CallState.peerName.isNotBlank()) CallState.peerName else CallState.peerId
+    val humanActive = phase == Phase.ACTIVE && !CallState.aiHandling
 
     Box(
         Modifier
@@ -90,59 +121,93 @@ fun CallScreen(onClose: () -> Unit) {
                 .fillMaxSize()
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(horizontal = 24.dp, vertical = 16.dp)
         ) {
-            Spacer(Modifier.height(48.dp))
-            Box(
+            Column(
                 Modifier
-                    .size(120.dp)
-                    .clip(CircleShape)
-                    .background(Brush.linearGradient(listOf(Accent, Violet))),
-                contentAlignment = Alignment.Center
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(
-                    label.take(1).ifEmpty { "?" }, fontSize = 48.sp,
-                    fontWeight = FontWeight.Bold, color = Bg
-                )
-            }
-            Spacer(Modifier.height(20.dp))
-            Text(label, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-            if (CallState.peerName.isNotBlank()) {
-                Text(CallState.peerId, color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp)
-            }
-            Spacer(Modifier.height(8.dp))
-            Text(status, color = Accent, fontSize = 16.sp, textAlign = TextAlign.Center)
-            if (CallState.info.isNotBlank()) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    CallState.info, color = Color.White.copy(alpha = 0.7f),
-                    textAlign = TextAlign.Center
-                )
-            }
+                Spacer(Modifier.height(24.dp))
+                Box(
+                    Modifier
+                        .size(110.dp)
+                        .clip(CircleShape)
+                        .background(Brush.linearGradient(listOf(Accent, Violet))),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        label.take(1).ifEmpty { "?" }, fontSize = 44.sp,
+                        fontWeight = FontWeight.Bold, color = Bg
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                Text(label, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                if (CallState.peerName.isNotBlank()) {
+                    Text(CallState.peerId, color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(status, color = Accent, fontSize = 16.sp, textAlign = TextAlign.Center)
+                if (CallState.info.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        CallState.info, color = Color.White.copy(alpha = 0.7f),
+                        textAlign = TextAlign.Center
+                    )
+                }
+                if (CallState.remoteHold) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("⏸ सामने वाले ने आपको होल्ड पर रखा है", color = Color(0xFFFFC857), fontSize = 14.sp)
+                }
+                if (CallState.onHold) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("⏸ आपने कॉल होल्ड पर रखी है", color = Color(0xFFFFC857), fontSize = 14.sp)
+                }
+                if (CallState.recording) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("🔴 रिकॉर्डिंग चालू", color = Danger, fontSize = 14.sp)
+                }
+                if (CallState.remoteRecording) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("🔴 सामने वाला कॉल रिकॉर्ड कर रहा है", color = Danger, fontSize = 14.sp)
+                }
 
-            Spacer(Modifier.weight(1f))
+                if (humanActive && showNote) {
+                    Spacer(Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = CallState.note,
+                        onValueChange = { CallState.note = it },
+                        label = { Text("कॉल का नोट (कॉल खत्म होने पर सेव होगा)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        colors = fieldColors()
+                    )
+                }
 
-            if (showPad && phase == Phase.ACTIVE && !CallState.aiHandling) {
-                listOf(
-                    listOf('1', '2', '3'), listOf('4', '5', '6'),
-                    listOf('7', '8', '9'), listOf('*', '0', '#')
-                ).forEach { row ->
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly
-                    ) {
-                        row.forEach { k ->
-                            Box(
-                                Modifier
-                                    .size(60.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.08f))
-                                    .clickable { CallManager.sendDigit(k) },
-                                contentAlignment = Alignment.Center
-                            ) { Text(k.toString(), fontSize = 22.sp) }
+                if (humanActive && showPad) {
+                    Spacer(Modifier.height(16.dp))
+                    listOf(
+                        listOf('1', '2', '3'), listOf('4', '5', '6'),
+                        listOf('7', '8', '9'), listOf('*', '0', '#')
+                    ).forEach { row ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            row.forEach { k ->
+                                Box(
+                                    Modifier
+                                        .size(58.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.08f))
+                                        .clickable { CallManager.sendDigit(k) },
+                                    contentAlignment = Alignment.Center
+                                ) { Text(k.toString(), fontSize = 22.sp) }
+                            }
                         }
                     }
                 }
@@ -166,36 +231,53 @@ fun CallScreen(onClose: () -> Unit) {
                     RoundIcon(Icons.Rounded.Call, Green, 76.dp) { CallManager.takeOver() }
                 }
 
-                phase == Phase.ACTIVE && !CallState.aiHandling -> Column(
+                humanActive -> Column(
+                    Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        RoundIcon(
+                        ActionBtn(
                             if (CallState.muted) Icons.Rounded.MicOff else Icons.Rounded.Mic,
-                            if (CallState.muted) Accent else Color.White.copy(alpha = 0.12f),
-                            tint = if (CallState.muted) Bg else Color.White
+                            "म्यूट", CallState.muted
                         ) { CallManager.toggleMute() }
-                        RoundIcon(
-                            Icons.Rounded.VolumeUp,
-                            if (CallState.speaker) Accent else Color.White.copy(alpha = 0.12f),
-                            tint = if (CallState.speaker) Bg else Color.White
+                        ActionBtn(
+                            Icons.Rounded.VolumeUp, "स्पीकर", CallState.speaker
                         ) { CallManager.toggleSpeaker() }
-                        RoundIcon(
-                            Icons.Rounded.Dialpad,
-                            if (showPad) Accent else Color.White.copy(alpha = 0.12f),
-                            tint = if (showPad) Bg else Color.White
-                        ) { showPad = !showPad }
+                        ActionBtn(
+                            if (CallState.onHold) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                            "होल्ड", CallState.onHold, Color(0xFFFFC857)
+                        ) { CallManager.toggleHold() }
                     }
-                    Spacer(Modifier.height(24.dp))
-                    RoundIcon(Icons.Rounded.CallEnd, Danger, 76.dp) { CallManager.hangup() }
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        ActionBtn(
+                            Icons.Rounded.FiberManualRecord, "रिकॉर्ड",
+                            CallState.recording, Danger
+                        ) { CallManager.toggleRecord() }
+                        ActionBtn(
+                            Icons.Rounded.Dialpad, "कीपैड", showPad
+                        ) { showPad = !showPad }
+                        ActionBtn(
+                            Icons.Rounded.Edit, "नोट", showNote
+                        ) { showNote = !showNote }
+                    }
+                    Spacer(Modifier.height(18.dp))
+                    RoundIcon(Icons.Rounded.CallEnd, Danger, 72.dp) { CallManager.hangup() }
                 }
 
-                else -> RoundIcon(Icons.Rounded.CallEnd, Danger, 76.dp) { CallManager.hangup() }
+                else -> Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    RoundIcon(Icons.Rounded.CallEnd, Danger, 76.dp) { CallManager.hangup() }
+                }
             }
-            Spacer(Modifier.height(16.dp))
         }
     }
 }
