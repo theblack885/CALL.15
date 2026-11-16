@@ -18,6 +18,7 @@ import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
+import java.io.File
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -41,6 +42,7 @@ object CallManager {
 
     private var isCaller = false
     private var wasAi = false
+    private var recordedThisCall = false
     @Volatile private var remoteSet = false
     @Volatile private var answerApplied = false
     private val pendingCands = mutableListOf<IceCandidate>()
@@ -50,6 +52,7 @@ object CallManager {
     private var capture: MicCapture? = null
     private var playback: Playback? = null
     private var agent: AiAgent? = null
+    @Volatile private var recorder: CallRecorder? = null
     @Volatile private var ringbackOn = false
     private var timeoutRunnable: Runnable? = null
 
@@ -76,12 +79,18 @@ object CallManager {
         pendingOffer = null
         connectedOnce = false
         wasAi = false
+        recordedThisCall = false
         CallState.muted = false
         CallState.speaker = false
         CallState.aiHandling = false
         CallState.ownerRinging = false
         CallState.startedAt = 0L
         CallState.info = ""
+        CallState.onHold = false
+        CallState.remoteHold = false
+        CallState.recording = false
+        CallState.remoteRecording = false
+        CallState.note = ""
     }
 
     // ---------------- Outgoing ----------------
@@ -385,7 +394,13 @@ object CallManager {
     private fun onAudio(bytes: ByteArray) {
         val pcm = ShortArray(bytes.size) { G711.decode(bytes[it]) }
         val a = agent
-        if (a != null && CallState.aiHandling) a.feed(pcm) else playback?.push(pcm)
+        if (a != null && CallState.aiHandling) {
+            a.feed(pcm)
+            return
+        }
+        if (CallState.onHold) return
+        recorder?.addRemote(pcm)
+        playback?.push(pcm)
     }
 
     private fun sendFrame(frame: ShortArray) {
@@ -410,6 +425,10 @@ object CallManager {
             msg == "BYE" -> main.post { remoteEnded("कॉल खत्म हुई") }
             msg == "STATE:CONNECTING" -> main.post { CallState.info = "आपको कनेक्ट किया जा रहा है…" }
             msg == "STATE:HUMAN" -> main.post { CallState.info = "" }
+            msg == "REC:1" -> main.post { CallState.remoteRecording = true }
+            msg == "REC:0" -> main.post { CallState.remoteRecording = false }
+            msg == "HOLD:1" -> main.post { CallState.remoteHold = true }
+            msg == "HOLD:0" -> main.post { CallState.remoteHold = false }
         }
     }
 
@@ -421,7 +440,12 @@ object CallManager {
         val pb = Playback()
         pb.start()
         playback = pb
-        val cap = MicCapture { f -> if (!CallState.muted) sendFrame(f) }
+        val cap = MicCapture { f ->
+            if (!CallState.muted && !CallState.onHold) {
+                sendFrame(f)
+                recorder?.addLocal(f)
+            }
+        }
         if (!cap.start()) CallState.info = "⚠️ माइक शुरू नहीं हुआ (permission देखें)"
         capture = cap
     }
@@ -511,6 +535,41 @@ object CallManager {
         }
     }
 
+    /** Hold: aapki awaaz band, saamne wale ko "होल्ड" dikhta hai. */
+    fun toggleHold() {
+        if (CallState.phase != Phase.ACTIVE || CallState.aiHandling) return
+        CallState.onHold = !CallState.onHold
+        sendCtl(if (CallState.onHold) "HOLD:1" else "HOLD:0")
+    }
+
+    /** Recording: saamne wale ko bhi "रिकॉर्डिंग चालू" ka notice jaata hai. */
+    fun toggleRecord() {
+        if (CallState.phase != Phase.ACTIVE || CallState.aiHandling) return
+        if (recorder == null) {
+            val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val f = File(recordingsDir(app), "call_${stamp}_${CallState.peerId}.wav")
+            val r = CallRecorder(f)
+            if (r.start()) {
+                recorder = r
+                recordedThisCall = true
+                CallState.recording = true
+                sendCtl("REC:1")
+            } else {
+                CallState.info = "⚠️ रिकॉर्डिंग शुरू नहीं हो पाई"
+            }
+        } else {
+            stopRecording()
+        }
+    }
+
+    private fun stopRecording() {
+        val r = recorder ?: return
+        recorder = null
+        try { r.stop() } catch (_: Exception) {}
+        CallState.recording = false
+        sendCtl("REC:0")
+    }
+
     fun hangup(reason: String = "") {
         if (CallState.phase == Phase.IDLE) return
         sendCtl("BYE")
@@ -534,19 +593,29 @@ object CallManager {
             (System.currentTimeMillis() - CallState.startedAt) / 1000 else 0L
         val dir = if (isCaller) "↗" else "↙"
         val tag = if (!isCaller && wasAi) " • AI" else ""
+        val rec = if (recordedThisCall) " • 🔴" else ""
         val time = SimpleDateFormat("dd MMM HH:mm", Locale.getDefault()).format(Date())
-        Prefs.addHistory(app, "$dir ${peerLabel()} • $time • ${dur}s$tag")
+        Prefs.addHistory(app, "$dir ${peerLabel()} • $time • ${dur}s$tag$rec")
+
+        val note = CallState.note.trim()
+        if (note.isNotEmpty()) Prefs.addNote(app, "${peerLabel()} • $time\n$note")
+        CallState.note = ""
+
         try { callDoc?.update("status", "ended") } catch (_: Exception) {}
         cleanup()
         CallState.info = msg
         CallState.aiHandling = false
         CallState.ownerRinging = false
+        CallState.onHold = false
+        CallState.remoteHold = false
+        CallState.remoteRecording = false
         CallState.startedAt = 0L
         CallState.phase = Phase.IDLE
     }
 
     @Suppress("DEPRECATION")
     private fun cleanup() {
+        stopRecording()
         stopRingback()
         Ringer.stop()
         Notifier.cancelIncoming(app)
