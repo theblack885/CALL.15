@@ -1,6 +1,7 @@
 package com.aicallguard.app
 
 import android.content.Context
+import org.json.JSONArray
 
 object Prefs {
     private fun sp(c: Context) = c.getSharedPreferences("callapp", Context.MODE_PRIVATE)
@@ -39,5 +40,32 @@ object Prefs {
         list.add(0, line)
         while (list.size > 50) list.removeAt(list.lastIndex)
         sp(c).edit().putString("hist", list.joinToString("\n")).apply()
+    }
+
+    // ---------- Notes ----------
+    fun notes(c: Context): List<String> = try {
+        val a = JSONArray(sp(c).getString("notes", "[]") ?: "[]")
+        List(a.length()) { a.getString(it) }
+    } catch (e: Exception) {
+        emptyList()
+    }
+
+    private fun saveNotes(c: Context, list: List<String>) {
+        sp(c).edit().putString("notes", JSONArray(list).toString()).apply()
+    }
+
+    fun addNote(c: Context, text: String) {
+        val l = notes(c).toMutableList()
+        l.add(0, text)
+        while (l.size > 100) l.removeAt(l.lastIndex)
+        saveNotes(c, l)
+    }
+
+    fun deleteNote(c: Context, index: Int) {
+        val l = notes(c).toMutableList()
+        if (index in l.indices) {
+            l.removeAt(index)
+            saveNotes(c, l)
+        }
     }
 }
