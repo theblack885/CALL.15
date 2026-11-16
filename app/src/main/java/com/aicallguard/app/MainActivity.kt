@@ -149,8 +149,8 @@ fun HomeScreen() {
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("डायल", "AI सेटिंग", "हिस्ट्री").forEachIndexed { i, t ->
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("डायल", "AI सेटिंग", "हिस्ट्री", "नोट्स").forEachIndexed { i, t ->
                     val sel = tab == i
                     Box(
                         Modifier
@@ -163,7 +163,7 @@ fun HomeScreen() {
                     ) {
                         Text(
                             t, color = if (sel) Bg else Color.White,
-                            fontWeight = FontWeight.Medium, fontSize = 14.sp
+                            fontWeight = FontWeight.Medium, fontSize = 13.sp
                         )
                     }
                 }
@@ -194,7 +194,11 @@ fun HomeScreen() {
                         }
                     )
                     1 -> AiTab()
-                    else -> HistoryTab()
+                    2 -> {
+                        HistoryTab()
+                        RecordingsCard()
+                    }
+                    else -> NotesTab()
                 }
             }
         }
