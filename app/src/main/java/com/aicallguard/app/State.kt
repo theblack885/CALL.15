@@ -20,6 +20,12 @@ object CallState {
     var ownerRinging by mutableStateOf(false)
     var startedAt by mutableStateOf(0L)
 
+    var onHold by mutableStateOf(false)
+    var remoteHold by mutableStateOf(false)
+    var recording by mutableStateOf(false)
+    var remoteRecording by mutableStateOf(false)
+    var note by mutableStateOf("")
+
     val log = mutableStateListOf<String>()
 
     fun addLog(s: String) {
