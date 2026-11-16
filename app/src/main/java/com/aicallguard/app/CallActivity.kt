@@ -1,5 +1,6 @@
 package com.aicallguard.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -56,7 +57,26 @@ class CallActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        handleAction(intent)
         setContent { GuardTheme { CallScreen(onClose = { finish() }) } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAction(intent)
+    }
+
+    /** Banner ka hara button dabane par call yahin se uthti hai. */
+    private fun handleAction(i: Intent?) {
+        if (i?.getStringExtra(Notifier.EXTRA_ACT) == "answer") {
+            i.removeExtra(Notifier.EXTRA_ACT)
+            when {
+                CallState.phase == Phase.INCOMING -> CallManager.acceptCall(false)
+                CallState.ownerRinging -> CallManager.takeOver()
+            }
+            Notifier.cancelIncoming(this)
+        }
     }
 }
 
