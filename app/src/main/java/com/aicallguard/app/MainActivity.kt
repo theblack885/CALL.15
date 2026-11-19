@@ -137,16 +137,9 @@ fun HomeScreen() {
         if (Build.VERSION.SDK_INT >= 33) p.add(Manifest.permission.POST_NOTIFICATIONS)
         if (Build.VERSION.SDK_INT >= 31) p.add(Manifest.permission.BLUETOOTH_CONNECT)
         permLauncher.launch(p.toTypedArray())
-
         if (Prefs.listenOn(ctx) && !ServiceState.listening) {
             try {
                 ContextCompat.startForegroundService(ctx, Intent(ctx, ListenService::class.java))
-            } catch (_: Exception) {
-            }
-        }
-        if (Prefs.btListenOn(ctx) && !BtState.listening) {
-            try {
-                ContextCompat.startForegroundService(ctx, Intent(ctx, BtListenService::class.java))
             } catch (_: Exception) {
             }
         }
@@ -209,7 +202,7 @@ fun HomeScreen() {
                 Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                listOf("डायल", "चैट", "AI", "हिस्ट्री", "नोट्स", "ब्लूटूथ").forEachIndexed { i, t ->
+                listOf("डायल", "चैट", "AI", "हिस्ट्री", "नोट्स").forEachIndexed { i, t ->
                     val sel = tab == i
                     Box(
                         Modifier
@@ -261,8 +254,7 @@ fun HomeScreen() {
                         HistoryTab()
                         RecordingsCard()
                     }
-                    4 -> NotesTab()
-                    else -> BtTab()
+                    else -> NotesTab()
                 }
             }
         }
