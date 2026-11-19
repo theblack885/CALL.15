@@ -27,11 +27,37 @@ object Prefs {
     fun trusted(c: Context): String = sp(c).getString("trusted", "") ?: ""
     fun setTrusted(c: Context, v: String) = sp(c).edit().putString("trusted", v).apply()
     fun isTrusted(c: Context, id: String): Boolean =
-        trusted(c).split(",").map { it.trim() }.filter { it.isNotEmpty() }.contains(id)
+        trusted(c).split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            .any { it.equals(id, ignoreCase = true) }
 
     fun listenOn(c: Context): Boolean = sp(c).getBoolean("listen", false)
     fun setListenOn(c: Context, v: Boolean) = sp(c).edit().putBoolean("listen", v).apply()
 
+    fun btListenOn(c: Context): Boolean = sp(c).getBoolean("btlisten", false)
+    fun setBtListenOn(c: Context, v: Boolean) = sp(c).edit().putBoolean("btlisten", v).apply()
+
+    // ---------- Sounds / Chat ----------
+    fun soundsOn(c: Context): Boolean = sp(c).getBoolean("sounds", true)
+    fun setSoundsOn(c: Context, v: Boolean) = sp(c).edit().putBoolean("sounds", v).apply()
+
+    fun lastRead(c: Context, peer: String): Long = sp(c).getLong("read_$peer", 0L)
+    fun setLastRead(c: Context, peer: String, t: Long) = sp(c).edit().putLong("read_$peer", t).apply()
+
+    fun lastNotified(c: Context): Long = sp(c).getLong("notified", 0L)
+    fun setLastNotified(c: Context, t: Long) = sp(c).edit().putLong("notified", t).apply()
+
+    fun extraPeers(c: Context): List<String> =
+        (sp(c).getString("peers", "") ?: "").split(",").filter { it.isNotBlank() }
+
+    fun addExtraPeer(c: Context, p: String) {
+        val l = extraPeers(c).toMutableList()
+        if (!l.contains(p)) {
+            l.add(p)
+            sp(c).edit().putString("peers", l.joinToString(",")).apply()
+        }
+    }
+
+    // ---------- History ----------
     fun history(c: Context): List<String> =
         (sp(c).getString("hist", "") ?: "").split("\n").filter { it.isNotBlank() }
 
