@@ -137,6 +137,7 @@ fun HomeScreen() {
         if (Build.VERSION.SDK_INT >= 33) p.add(Manifest.permission.POST_NOTIFICATIONS)
         if (Build.VERSION.SDK_INT >= 31) p.add(Manifest.permission.BLUETOOTH_CONNECT)
         permLauncher.launch(p.toTypedArray())
+
         if (Prefs.listenOn(ctx) && !ServiceState.listening) {
             try {
                 ContextCompat.startForegroundService(ctx, Intent(ctx, ListenService::class.java))
@@ -186,7 +187,7 @@ fun HomeScreen() {
                     }
                     IconButton(onClick = {
                         val cm = ctx.getSystemService(ClipboardManager::class.java)
-                        cm.setPrimaryClip(ClipData.newPlainText("id", myId))
+                        cm?.setPrimaryClip(ClipData.newPlainText("id", myId))
                         toast("ID कॉपी हो गया")
                     }) { Icon(Icons.Rounded.ContentCopy, contentDescription = "copy") }
                 }
