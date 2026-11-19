@@ -6,8 +6,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -15,17 +18,24 @@ import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 
-/** Peeche chalta rehta hai aur aapke ID par aane wali calls sunta hai. */
+/** Peeche chalta rehta hai aur aapke ID par aane wali calls (aur chat) sunta hai. */
 class ListenService : Service() {
     private var reg: ListenerRegistration? = null
     private var wl: PowerManager.WakeLock? = null
 
+    private fun toast(msg: String) {
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(applicationContext, msg, Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Notifier.ensureChannels(this)
+        Sounds.init(this)
         val n = NotificationCompat.Builder(this, Notifier.CH_SERVICE)
             .setSmallIcon(android.R.drawable.sym_call_incoming)
             .setContentTitle("AI Call चालू है")
-            .setContentText("आने वाली कॉल सुन रहा हूँ • आपका ID: ${Prefs.myId(this)}")
+            .setContentText("कॉल और चैट सुन रहा हूँ • आपका ID: ${Prefs.myId(this)}")
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
@@ -37,18 +47,27 @@ class ListenService : Service() {
             wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "aicall:listen").also { it.acquire() }
         }
 
+        ChatRepo.start(applicationContext)
+
         if (reg == null) {
             val myId = Prefs.myId(this)
             reg = FirebaseFirestore.getInstance().collection("calls")
                 .whereEqualTo("to", myId)
                 .whereEqualTo("status", "ringing")
-                .addSnapshotListener { snap, _ ->
+                .addSnapshotListener { snap, e ->
+                    if (e != null) {
+                        toast("Firebase error: ${e.message}")
+                        CallState.addLog("⚠️ Firebase listen error: ${e.message}")
+                        return@addSnapshotListener
+                    }
                     snap?.documentChanges?.forEach { ch ->
                         if (ch.type == DocumentChange.Type.ADDED) {
+                            CallState.addLog("📩 Call aayi: ${ch.document.getString("from")}")
                             CallManager.onIncoming(applicationContext, ch.document.id, ch.document.data)
                         }
                     }
                 }
+            toast("सुनना शुरू: आपका ID $myId")
         }
         ServiceState.listening = true
         return START_STICKY
