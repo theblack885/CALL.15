@@ -1,56 +1,38 @@
 package com.aicallguard.app
 
-import android.Manifest
-import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.graphics.BitmapFactory
 import android.os.Bundle
-import android.util.Base64
-import android.widget.MediaController
-import android.widget.Toast
-import android.widget.VideoView
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.Send
-import androidx.compose.material.icons.rounded.AttachFile
 import androidx.compose.material.icons.rounded.Call
-import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.CallEnd
+import androidx.compose.material.icons.rounded.Dialpad
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.FiberManualRecord
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.MicOff
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -64,373 +46,279 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import kotlinx.coroutines.delay
 
-class ChatActivity : ComponentActivity() {
-    private var peer = ""
-
+class CallActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         Sounds.init(this)
-        ChatRepo.start(this)
-        peer = intent.getStringExtra("peer") ?: ""
-        if (peer.isBlank()) {
-            finish()
-            return
-        }
-        setContent { GuardTheme { ChatScreen(peer) { finish() } } }
+        handleAction(intent)
+        setContent { GuardTheme { CallScreen(onClose = { finish() }) } }
     }
 
-    override fun onResume() {
-        super.onResume()
-        ChatRepo.activePeer = peer
-        ChatRepo.markRead(peer)
-        Notifier.cancelMessage(this, peer)
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAction(intent)
     }
 
-    override fun onPause() {
-        super.onPause()
-        ChatRepo.activePeer = ""
-    }
-}
-
-private fun decodeThumb(b64: String): ImageBitmap? = try {
-    if (b64.isBlank()) null else {
-        val b = Base64.decode(b64, Base64.NO_WRAP)
-        BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap()
-    }
-} catch (e: Exception) {
-    null
-}
-
-private fun fmtSize(n: Long): String = when {
-    n >= 1024 * 1024 -> "%.1f MB".format(n / 1024.0 / 1024.0)
-    n >= 1024 -> "${n / 1024} KB"
-    else -> "$n B"
-}
-
-private fun openFile(ctx: Context, m: Msg) {
-    ChatRepo.fetchFile(m) { f ->
-        if (f == null) return@fetchFile
-        try {
-            val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", f)
-            ctx.startActivity(
-                Intent(Intent.ACTION_VIEW)
-                    .setDataAndType(uri, m.mime.ifBlank { "*/*" })
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        } catch (e: Exception) {
-            Toast.makeText(ctx, "इस फ़ाइल को खोलने वाला ऐप नहीं मिला", Toast.LENGTH_LONG).show()
+    /** Banner ka hara button dabane par call yahin se uthti hai. */
+    private fun handleAction(i: Intent?) {
+        if (i?.getStringExtra(Notifier.EXTRA_ACT) == "answer") {
+            i.removeExtra(Notifier.EXTRA_ACT)
+            when {
+                CallState.phase == Phase.INCOMING -> CallManager.acceptCall(false)
+                CallState.ownerRinging -> CallManager.takeOver()
+            }
+            Notifier.cancelIncoming(this)
         }
     }
 }
 
 @Composable
-fun ChatScreen(peer: String, onBack: () -> Unit) {
-    val ctx = LocalContext.current
-    val me = remember { Prefs.myId(ctx) }
-    val list = ChatRepo.conversation(peer)
-    var text by remember { mutableStateOf("") }
-    var menu by remember { mutableStateOf(false) }
-    var viewer by remember { mutableStateOf<Msg?>(null) }
-    val listState = rememberLazyListState()
-    val title = ChatRepo.peerName(peer).ifBlank { peer }
+private fun ActionBtn(
+    icon: ImageVector,
+    label: String,
+    active: Boolean,
+    activeColor: Color = Accent,
+    onClick: () -> Unit
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        RoundIcon(
+            icon = icon,
+            bg = if (active) activeColor else Color.White.copy(alpha = 0.12f),
+            boxSize = 58.dp,
+            tint = if (active) Bg else Color.White,
+            onClick = {
+                Sounds.play(Sounds.S.TAP)
+                onClick()
+            }
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(label, fontSize = 11.sp, color = Color.White.copy(alpha = 0.7f))
+    }
+}
 
-    val pickImg = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { u ->
-        if (u != null) ChatRepo.sendUri(peer, u, "image")
+@Composable
+fun CallScreen(onClose: () -> Unit) {
+    val phase = CallState.phase
+    val ringingOwner = CallState.aiHandling && CallState.ownerRinging
+    var showPad by remember { mutableStateOf(false) }
+    var showNote by remember { mutableStateOf(false) }
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    var prev by remember { mutableStateOf(phase) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1000)
+            now = System.currentTimeMillis()
+        }
     }
-    val pickVid = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { u ->
-        if (u != null) ChatRepo.sendUri(peer, u, "video")
+    LaunchedEffect(phase) {
+        if (phase == Phase.IDLE) onClose()
+        // Call ke sounds: jud gayi / khatam
+        if (phase == Phase.ACTIVE && prev != Phase.ACTIVE) Sounds.play(Sounds.S.CALL_CONNECT)
+        if (phase == Phase.IDLE && prev != Phase.IDLE) Sounds.play(Sounds.S.CALL_END)
+        prev = phase
     }
-    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { u ->
-        if (u != null) ChatRepo.sendUri(peer, u, "file")
+    // Call lagte waqt "tu... tu..." (ringback)
+    LaunchedEffect(phase == Phase.OUTGOING) {
+        while (CallState.phase == Phase.OUTGOING) {
+            Sounds.play(Sounds.S.RINGBACK)
+            delay(4000)
+        }
     }
 
-    LaunchedEffect(list.size) {
-        if (list.isNotEmpty()) listState.animateScrollToItem(list.lastIndex)
-        ChatRepo.markRead(peer)
+    val secs = if (CallState.startedAt > 0) ((now - CallState.startedAt) / 1000).toInt() else 0
+    val timer = "%02d:%02d".format(secs / 60, secs % 60)
+    val status = when {
+        phase == Phase.OUTGOING -> "कॉल लगाई जा रही है…"
+        phase == Phase.INCOMING -> "आपको कॉल आ रही है"
+        phase == Phase.CONNECTING -> "कनेक्ट हो रहा है…"
+        ringingOwner -> "कोड सही — लाइन पर है"
+        phase == Phase.ACTIVE && CallState.aiHandling -> "AI असिस्टेंट बात कर रहा है • $timer"
+        phase == Phase.ACTIVE -> timer
+        else -> ""
     }
+    val label = if (CallState.peerName.isNotBlank()) CallState.peerName else CallState.peerId
+    val humanActive = phase == Phase.ACTIVE && !CallState.aiHandling
 
     Box(
         Modifier
             .fillMaxSize()
-            .background(Brush.verticalGradient(listOf(Color(0xFF0B1020), Bg)))
+            .background(Brush.verticalGradient(listOf(Color(0xFF111A33), Bg)))
     ) {
         Column(
             Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .imePadding()
+                .padding(horizontal = 24.dp, vertical = 16.dp)
         ) {
-            // ---- top bar ----
-            Row(
+            Column(
                 Modifier
+                    .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "back")
-                }
+                Spacer(Modifier.height(24.dp))
                 Box(
                     Modifier
-                        .size(42.dp)
+                        .size(110.dp)
                         .clip(CircleShape)
                         .background(Brush.linearGradient(listOf(Accent, Violet))),
                     contentAlignment = Alignment.Center
-                ) { Text(title.take(1), color = Bg, fontWeight = FontWeight.Bold, fontSize = 18.sp) }
-                Column(Modifier.weight(1f).padding(start = 10.dp)) {
-                    Text(title, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                    Text("ID: $peer", fontSize = 11.sp, color = Color.White.copy(alpha = 0.5f))
-                }
-                IconButton(onClick = {
-                    if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO)
-                        != PackageManager.PERMISSION_GRANTED
-                    ) {
-                        Toast.makeText(ctx, "माइक की permission दीजिए (मुख्य स्क्रीन पर)", Toast.LENGTH_LONG).show()
-                    } else {
-                        val err = CallManager.startCall(ctx, peer)
-                        if (err != null) Toast.makeText(ctx, err, Toast.LENGTH_LONG).show()
-                        else ctx.startActivity(Intent(ctx, CallActivity::class.java))
-                    }
-                }) { Icon(Icons.Rounded.Call, contentDescription = "call", tint = Green) }
-            }
-
-            // ---- messages ----
-            if (list.isEmpty()) {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                ) {
                     Text(
-                        "अभी कोई मैसेज नहीं।\nपहला मैसेज भेजिए 👋",
-                        color = Color.White.copy(alpha = 0.45f), textAlign = TextAlign.Center
+                        label.take(1).ifEmpty { "?" }, fontSize = 44.sp,
+                        fontWeight = FontWeight.Bold, color = Bg
                     )
                 }
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    contentPadding = PaddingValues(vertical = 8.dp)
-                ) {
-                    items(list, key = { it.id }) { m ->
-                        Bubble(m, mine = m.from == me) { msg ->
-                            when (msg.type) {
-                                "image", "video" -> viewer = msg
-                                "file" -> openFile(ctx, msg)
+                Spacer(Modifier.height(16.dp))
+                Text(label, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                if (CallState.peerName.isNotBlank()) {
+                    Text(CallState.peerId, color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(status, color = Accent, fontSize = 16.sp, textAlign = TextAlign.Center)
+                if (CallState.info.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        CallState.info, color = Color.White.copy(alpha = 0.7f),
+                        textAlign = TextAlign.Center
+                    )
+                }
+                if (CallState.remoteHold) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("⏸ सामने वाले ने आपको होल्ड पर रखा है", color = Color(0xFFFFC857), fontSize = 14.sp)
+                }
+                if (CallState.onHold) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("⏸ आपने कॉल होल्ड पर रखी है", color = Color(0xFFFFC857), fontSize = 14.sp)
+                }
+                if (CallState.recording) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("🔴 रिकॉर्डिंग चालू", color = Danger, fontSize = 14.sp)
+                }
+                if (CallState.remoteRecording) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("🔴 सामने वाला कॉल रिकॉर्ड कर रहा है", color = Danger, fontSize = 14.sp)
+                }
+
+                if (humanActive && showNote) {
+                    Spacer(Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = CallState.note,
+                        onValueChange = { CallState.note = it },
+                        label = { Text("कॉल का नोट (कॉल खत्म होने पर सेव होगा)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 2,
+                        colors = fieldColors()
+                    )
+                }
+
+                if (humanActive && showPad) {
+                    Spacer(Modifier.height(16.dp))
+                    listOf(
+                        listOf('1', '2', '3'), listOf('4', '5', '6'),
+                        listOf('7', '8', '9'), listOf('*', '0', '#')
+                    ).forEach { row ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            row.forEach { k ->
+                                Box(
+                                    Modifier
+                                        .size(58.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.08f))
+                                        .clickable {
+                                            Sounds.dtmf(k)
+                                            CallManager.sendDigit(k)
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) { Text(k.toString(), fontSize = 22.sp) }
                             }
                         }
                     }
                 }
+                Spacer(Modifier.height(12.dp))
             }
 
-            // ---- uploads ----
-            ChatRepo.uploads.values.filter { it.peer == peer }.forEach { u ->
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                    Text("⬆ ${u.name} • ${u.percent}%", fontSize = 12.sp, color = Accent)
-                    LinearProgressIndicator(
-                        progress = { u.percent / 100f },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
-
-            // ---- input bar ----
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box {
-                    IconButton(onClick = { menu = true }) {
-                        Icon(Icons.Rounded.AttachFile, contentDescription = "attach", tint = Accent)
-                    }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("🖼  फ़ोटो") }, onClick = {
-                            menu = false
-                            pickImg.launch("image/*")
-                        })
-                        DropdownMenuItem(text = { Text("🎥  वीडियो (8 MB तक)") }, onClick = {
-                            menu = false
-                            pickVid.launch("video/*")
-                        })
-                        DropdownMenuItem(text = { Text("📎  फ़ाइल (8 MB तक)") }, onClick = {
-                            menu = false
-                            pickFile.launch("*/*")
-                        })
-                    }
-                }
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    placeholder = { Text("मैसेज लिखिए") },
-                    modifier = Modifier.weight(1f),
-                    maxLines = 4,
-                    shape = RoundedCornerShape(26.dp),
-                    colors = fieldColors()
-                )
-                IconButton(
-                    onClick = {
-                        ChatRepo.sendText(peer, text)
-                        text = ""
-                    },
-                    enabled = text.isNotBlank()
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.Send, contentDescription = "send",
-                        tint = if (text.isNotBlank()) Accent else Color.White.copy(alpha = 0.3f)
-                    )
-                }
-            }
-        }
-
-        viewer?.let { MediaViewer(it) { viewer = null } }
-    }
-}
-
-@Composable
-fun Bubble(m: Msg, mine: Boolean, onOpen: (Msg) -> Unit) {
-    val shape = RoundedCornerShape(
-        topStart = 18.dp, topEnd = 18.dp,
-        bottomStart = if (mine) 18.dp else 4.dp, bottomEnd = if (mine) 4.dp else 18.dp
-    )
-    val fg = if (mine) Bg else Color.White
-    val time = remember(m.ts) { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(m.ts)) }
-
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start
-    ) {
-        Column(
-            Modifier
-                .widthIn(max = 290.dp)
-                .clip(shape)
-                .background(if (mine) Accent else Color.White.copy(alpha = 0.09f))
-                .padding(8.dp)
-        ) {
-            when (m.type) {
-                "image", "video" -> {
-                    val bmp = remember(m.id) { decodeThumb(m.thumb) }
-                    Box(
-                        Modifier
-                            .size(220.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.Black.copy(alpha = 0.25f))
-                            .clickable { onOpen(m) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (bmp != null) {
-                            Image(bmp, contentDescription = null, contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize())
-                        } else {
-                            Text(if (m.type == "image") "🖼 फ़ोटो" else "🎥 वीडियो", color = Color.White)
-                        }
-                        if (m.type == "video") {
-                            Box(
-                                Modifier.size(52.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)),
-                                contentAlignment = Alignment.Center
-                            ) { Icon(Icons.Rounded.PlayArrow, null, tint = Color.White, modifier = Modifier.size(32.dp)) }
-                        }
-                    }
-                    Text(
-                        "${m.name} • ${fmtSize(m.size)}", color = fg.copy(alpha = 0.7f),
-                        fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-                "file" -> Row(
-                    Modifier.clickable { onOpen(m) }.padding(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Rounded.Description, null, tint = fg, modifier = Modifier.size(34.dp))
-                    Column(Modifier.padding(start = 8.dp)) {
-                        Text(m.name, color = fg, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 2)
-                        Text(fmtSize(m.size) + " • खोलने के लिए टैप करें", color = fg.copy(alpha = 0.7f), fontSize = 11.sp)
-                    }
-                }
-                else -> Text(m.text, color = fg, fontSize = 15.sp)
-            }
-            Text(
-                time + if (mine) (if (m.pending) "  🕓" else "  ✓") else "",
-                color = fg.copy(alpha = 0.6f), fontSize = 10.sp,
-                modifier = Modifier.align(Alignment.End).padding(top = 2.dp)
-            )
-        }
-    }
-}
-
-@Composable
-fun MediaViewer(m: Msg, onClose: () -> Unit) {
-    var file by remember { mutableStateOf<File?>(null) }
-    var failed by remember { mutableStateOf(false) }
-
-    LaunchedEffect(m.id) {
-        ChatRepo.fetchFile(m) { f -> if (f == null) failed = true else file = f }
-    }
-
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.94f)),
-            contentAlignment = Alignment.Center
-        ) {
-            val f = file
             when {
-                failed -> Text("डाउनलोड नहीं हो पाया", color = Color.White)
-                f == null -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = Accent)
-                    Spacer(Modifier.height(12.dp))
-                    Text("डाउनलोड हो रहा है…", color = Color.White)
+                phase == Phase.INCOMING -> Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    RoundIcon(Icons.Rounded.CallEnd, Danger, 76.dp) { CallManager.decline() }
+                    RoundIcon(Icons.Rounded.Call, Green, 76.dp) { CallManager.acceptCall(false) }
                 }
-                m.type == "image" -> {
-                    val bmp = remember(f) { BitmapFactory.decodeFile(f.path)?.asImageBitmap() }
-                    if (bmp != null) {
-                        Image(bmp, contentDescription = null, contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize())
-                    } else Text("फ़ोटो खुली नहीं", color = Color.White)
+
+                ringingOwner -> Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    RoundIcon(Icons.Rounded.CallEnd, Danger, 76.dp) { CallManager.hangup() }
+                    RoundIcon(Icons.Rounded.Call, Green, 76.dp) { CallManager.takeOver() }
                 }
-                else -> AndroidView(
-                    factory = { c ->
-                        VideoView(c).apply {
-                            setVideoPath(f.path)
-                            val mc = MediaController(c)
-                            mc.setAnchorView(this)
-                            setMediaController(mc)
-                            setOnPreparedListener { start() }
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth().height(320.dp)
-                )
+
+                humanActive -> Column(
+                    Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        ActionBtn(
+                            if (CallState.muted) Icons.Rounded.MicOff else Icons.Rounded.Mic,
+                            "म्यूट", CallState.muted
+                        ) { CallManager.toggleMute() }
+                        ActionBtn(
+                            Icons.Rounded.VolumeUp, "स्पीकर", CallState.speaker
+                        ) { CallManager.toggleSpeaker() }
+                        ActionBtn(
+                            if (CallState.onHold) Icons.Rounded.PlayArrow else Icons.Rounded.Pause,
+                            "होल्ड", CallState.onHold, Color(0xFFFFC857)
+                        ) { CallManager.toggleHold() }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        ActionBtn(
+                            Icons.Rounded.FiberManualRecord, "रिकॉर्ड",
+                            CallState.recording, Danger
+                        ) { CallManager.toggleRecord() }
+                        ActionBtn(
+                            Icons.Rounded.Dialpad, "कीपैड", showPad
+                        ) { showPad = !showPad }
+                        ActionBtn(
+                            Icons.Rounded.Edit, "नोट", showNote
+                        ) { showNote = !showNote }
+                    }
+                    Spacer(Modifier.height(18.dp))
+                    RoundIcon(Icons.Rounded.CallEnd, Danger, 72.dp) { CallManager.hangup() }
+                }
+
+                else -> Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    RoundIcon(Icons.Rounded.CallEnd, Danger, 76.dp) { CallManager.hangup() }
+                }
             }
-            Text(
-                "✕", color = Color.White, fontSize = 26.sp,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding()
-                    .padding(16.dp)
-                    .clickable { onClose() }
-            )
         }
     }
 }
