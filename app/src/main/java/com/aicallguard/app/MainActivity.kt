@@ -3,8 +3,10 @@ package com.aicallguard.app
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -15,6 +17,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,13 +67,31 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         Notifier.ensureChannels(this)
+        Sounds.init(this)
+        ChatRepo.start(this)
         setContent { GuardTheme { HomeScreen() } }
+    }
+}
+
+/** SIM wale number par phone ke apne dialer se normal call. */
+private fun placeSimCall(ctx: Context, number: String, direct: Boolean) {
+    try {
+        val uri = Uri.parse("tel:" + Uri.encode(number))
+        val action = if (direct) Intent.ACTION_CALL else Intent.ACTION_DIAL
+        ctx.startActivity(Intent(action, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val time = SimpleDateFormat("dd MMM HH:mm", Locale.getDefault()).format(Date())
+        Prefs.addHistory(ctx, "↗ 📱 SIM • $number • $time")
+    } catch (e: Exception) {
+        Toast.makeText(ctx, "कॉल नहीं लग पाई: ${e.message}", Toast.LENGTH_LONG).show()
     }
 }
 
@@ -79,6 +100,7 @@ fun HomeScreen() {
     val ctx = LocalContext.current
     val myId = remember { Prefs.myId(ctx) }
     var tab by remember { mutableIntStateOf(0) }
+    var pendingSim by remember { mutableStateOf("") }
     val listening = ServiceState.listening
 
     fun toast(s: String) = Toast.makeText(ctx, s, Toast.LENGTH_LONG).show()
@@ -87,12 +109,45 @@ fun HomeScreen() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { }
 
+    val simPerm = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { ok ->
+        val n = pendingSim
+        pendingSim = ""
+        if (n.isNotEmpty()) placeSimCall(ctx, n, ok)
+    }
+
+    fun simCall(number: String) {
+        if (number.length < 5) {
+            toast("सही नंबर डालिए")
+            return
+        }
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CALL_PHONE)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            placeSimCall(ctx, number, true)
+        } else {
+            pendingSim = number
+            simPerm.launch(Manifest.permission.CALL_PHONE)
+        }
+    }
+
     LaunchedEffect(Unit) {
         val p = mutableListOf(Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= 33) p.add(Manifest.permission.POST_NOTIFICATIONS)
+        if (Build.VERSION.SDK_INT >= 31) p.add(Manifest.permission.BLUETOOTH_CONNECT)
         permLauncher.launch(p.toTypedArray())
         if (Prefs.listenOn(ctx) && !ServiceState.listening) {
-            ContextCompat.startForegroundService(ctx, Intent(ctx, ListenService::class.java))
+            try {
+                ContextCompat.startForegroundService(ctx, Intent(ctx, ListenService::class.java))
+            } catch (_: Exception) {
+            }
+        }
+        if (Prefs.btListenOn(ctx) && !BtState.listening) {
+            try {
+                ContextCompat.startForegroundService(ctx, Intent(ctx, BtListenService::class.java))
+            } catch (_: Exception) {
+            }
         }
     }
 
@@ -118,7 +173,7 @@ fun HomeScreen() {
             Column {
                 Text("AI Call Guard", fontSize = 30.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    "आपका अपना कॉलिंग सिस्टम + AI रिसेप्शनिस्ट",
+                    "आपका अपना कॉलिंग सिस्टम + AI रिसेप्शनिस्ट + चैट",
                     color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp
                 )
             }
@@ -138,9 +193,9 @@ fun HomeScreen() {
                 Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("कॉल रिसीव करना", fontWeight = FontWeight.SemiBold)
+                        Text("इंटरनेट से कॉल रिसीव करना", fontWeight = FontWeight.SemiBold)
                         Text(
-                            if (listening) "चालू • आपके ID पर कॉल आ सकती हैं" else "बंद • कॉल नहीं आएगी",
+                            if (listening) "चालू • कॉल और चैट नोटिफ़िकेशन आएँगे" else "बंद • इंटरनेट कॉल नहीं आएगी",
                             color = if (listening) Accent else Color.White.copy(alpha = 0.5f),
                             fontSize = 12.sp
                         )
@@ -149,16 +204,21 @@ fun HomeScreen() {
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("डायल", "AI सेटिंग", "हिस्ट्री", "नोट्स").forEachIndexed { i, t ->
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                listOf("डायल", "चैट", "AI", "हिस्ट्री", "नोट्स", "ब्लूटूथ").forEachIndexed { i, t ->
                     val sel = tab == i
                     Box(
                         Modifier
-                            .weight(1f)
                             .clip(RoundedCornerShape(50))
                             .background(if (sel) Accent else Color.White.copy(alpha = 0.07f))
-                            .clickable { tab = i }
-                            .padding(vertical = 10.dp),
+                            .clickable {
+                                Sounds.play(Sounds.S.TAP)
+                                tab = i
+                            }
+                            .padding(horizontal = 18.dp, vertical = 10.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -191,14 +251,17 @@ fun HomeScreen() {
                                 if (err != null) toast(err)
                                 else ctx.startActivity(Intent(ctx, CallActivity::class.java))
                             }
-                        }
+                        },
+                        onSimCall = { number -> simCall(number) }
                     )
-                    1 -> AiTab()
-                    2 -> {
+                    1 -> ChatTab()
+                    2 -> AiTab()
+                    3 -> {
                         HistoryTab()
                         RecordingsCard()
                     }
-                    else -> NotesTab()
+                    4 -> NotesTab()
+                    else -> BtTab()
                 }
             }
         }
@@ -206,7 +269,7 @@ fun HomeScreen() {
 }
 
 @Composable
-fun DialTab(onCall: (String) -> Unit) {
+fun DialTab(onCall: (String) -> Unit, onSimCall: (String) -> Unit) {
     var number by remember { mutableStateOf("") }
 
     @Composable
@@ -216,15 +279,18 @@ fun DialTab(onCall: (String) -> Unit) {
                 .size(68.dp)
                 .clip(CircleShape)
                 .background(Color.White.copy(alpha = 0.08f))
-                .clickable { if (number.length < 12) number += label },
+                .clickable {
+                    Sounds.dtmf(label[0])
+                    if (number.length < 15) number += label
+                },
             contentAlignment = Alignment.Center
         ) { Text(label, fontSize = 24.sp, fontWeight = FontWeight.Medium) }
     }
 
     GlassCard {
         Text(
-            if (number.isEmpty()) "सामने वाले का ID डालिए" else number,
-            fontSize = if (number.isEmpty()) 16.sp else 34.sp,
+            if (number.isEmpty()) "ID या मोबाइल नंबर डालिए" else number,
+            fontSize = if (number.isEmpty()) 16.sp else if (number.length > 10) 26.sp else 34.sp,
             fontWeight = FontWeight.Bold,
             color = if (number.isEmpty()) Color.White.copy(alpha = 0.35f) else Color.White,
             modifier = Modifier
@@ -232,6 +298,14 @@ fun DialTab(onCall: (String) -> Unit) {
                 .padding(vertical = 8.dp),
             textAlign = TextAlign.Center
         )
+        Text(
+            "8 अंक का ID = ऐप-से-ऐप कॉल (इंटरनेट) • मोबाइल नंबर = SIM से normal कॉल",
+            fontSize = 11.sp,
+            color = Color.White.copy(alpha = 0.45f),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(6.dp))
         listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9")).forEach { row ->
             Row(
                 Modifier
@@ -252,12 +326,24 @@ fun DialTab(onCall: (String) -> Unit) {
                     .size(68.dp)
                     .clip(CircleShape)
                     .background(Color.White.copy(alpha = 0.08f))
-                    .clickable { number = number.dropLast(1) },
+                    .clickable {
+                        Sounds.play(Sounds.S.TAP)
+                        number = number.dropLast(1)
+                    },
                 contentAlignment = Alignment.Center
             ) { Text("⌫", fontSize = 24.sp) }
             Key("0")
-            RoundIcon(Icons.Rounded.Call, Green) { onCall(number) }
+            RoundIcon(Icons.Rounded.Call, Green) {
+                Sounds.play(Sounds.S.TAP)
+                onCall(number)
+            }
         }
+        Spacer(Modifier.height(6.dp))
+        Button(
+            onClick = { onSimCall(number) },
+            colors = ButtonDefaults.buttonColors(containerColor = Violet, contentColor = Color.White),
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("📱 SIM नंबर पर कॉल (normal कॉल)") }
     }
 }
 
@@ -288,7 +374,7 @@ fun AiTab() {
         OutlinedTextField(
             value = name,
             onValueChange = { name = it; Prefs.setName(ctx, it) },
-            label = { Text("आपका नाम (AI यही बोलेगा)") },
+            label = { Text("आपका नाम (AI यही बोलेगा, चैट में भी दिखेगा)") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             colors = fieldColors()
@@ -321,7 +407,7 @@ fun AiTab() {
         OutlinedTextField(
             value = trusted,
             onValueChange = { trusted = it; Prefs.setTrusted(ctx, it) },
-            label = { Text("भरोसेमंद IDs (कॉमा से अलग, इनकी कॉल सीधी आएगी)") },
+            label = { Text("भरोसेमंद IDs / Bluetooth नाम (कॉमा से अलग)") },
             modifier = Modifier.fillMaxWidth(),
             colors = fieldColors()
         )
