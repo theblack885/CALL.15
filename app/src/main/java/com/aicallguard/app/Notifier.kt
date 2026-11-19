@@ -17,6 +17,7 @@ import androidx.core.app.Person
 object Notifier {
     const val CH_SERVICE = "service"
     const val CH_INCOMING = "incoming_v2"
+    const val CH_CHAT = "chat"
     const val ACTION_DECLINE = "com.aicallguard.app.DECLINE"
     const val EXTRA_ACT = "act"
 
@@ -31,6 +32,11 @@ object Notifier {
             ch.enableVibration(false)
             ch.lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             nm.createNotificationChannel(ch)
+
+            val chat = NotificationChannel(CH_CHAT, "चैट मैसेज", NotificationManager.IMPORTANCE_HIGH)
+            chat.setSound(null, null)   // आवाज़ ऐप खुद बजाता है
+            chat.enableVibration(true)
+            nm.createNotificationChannel(chat)
         }
     }
 
@@ -77,6 +83,33 @@ object Notifier {
 
     fun cancelIncoming(ctx: Context) {
         ctx.getSystemService(NotificationManager::class.java).cancel(2)
+    }
+
+    private fun msgId(peer: String) = 1000 + (peer.hashCode() and 0xFFFF)
+
+    /** Naye chat message ki notification. */
+    fun message(ctx: Context, peer: String, title: String, text: String) {
+        ensureChannels(ctx)
+        val i = Intent(ctx, ChatActivity::class.java)
+            .putExtra("peer", peer)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val pi = PendingIntent.getActivity(
+            ctx, msgId(peer), i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val n = NotificationCompat.Builder(ctx, CH_CHAT)
+            .setSmallIcon(android.R.drawable.sym_action_chat)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setAutoCancel(true)
+            .setContentIntent(pi)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .build()
+        ctx.getSystemService(NotificationManager::class.java).notify(msgId(peer), n)
+    }
+
+    fun cancelMessage(ctx: Context, peer: String) {
+        ctx.getSystemService(NotificationManager::class.java).cancel(msgId(peer))
     }
 }
 
